@@ -35,6 +35,8 @@ cur = con.cursor()
 #cur.execute('''DROP table IF EXISTS temp_results''')
 cur.execute('''CREATE TABLE IF NOT EXISTS  temp_results (key text, value text)''')
 
+# implement all of the class here
+
 class MapReduceEngine:
     def execute(self, input_data, map_function, reduce_function):
         """
@@ -50,13 +52,27 @@ class MapReduceEngine:
             thread_arr[i].start()
         self.isThreadAlive(thread_arr)
         self.loadCsvToDB()
+        group_list=self.GroupQueries()
+        thread_arr = []
+        for i in range(len(group_list)):
+            thread_arr.append(threading.Thread(target=reduce_function,args=[group_list[i]]))
+            thread_arr[i].start()
+        self.isThreadAlive(thread_arr)
     def CsvPerThread(self, key):
         records_number = 10
-        temp_df = pd.DataFrame()
-        secondname = ['Mayfield', 'Redding', 'Charles', 'Brown', 'Gaye', 'Simone', 'Wonder', 'Heron', 'Franklin']
-        temp_df['secondname'] = pd.Series(random.choices(secondname, k=records_number))
+        x=[]
+        for i in range(records_number): x.append((random.choice(firstname),random.choice(secondname)))
         thread_num=threading.current_thread().name.split('-')[1]
-        temp_df.to_csv('mapreducetemp/part-tmp-{0}.csv'.format(thread_num), index=False)
+        temp_df=pd.DataFrame(x)
+        temp_df.to_csv('mapreducetemp/part-tmp-{0}.csv'.format(thread_num), index=False, header=None)
+        return
+    def CsvPerThreadFinal(self, key):
+        records_number = 10
+        x=[]
+        for i in range(records_number): x.append((random.choice(firstname),random.choice(secondname)))
+        thread_num=threading.current_thread().name.split('-')[1]
+        temp_df=pd.DataFrame(x)
+        temp_df.to_csv('mapreducefinal/part-{0}-final.csv'.format(thread_num), index=False, header=None)
         return
     def isThreadAlive(self, threadList): #Join in C - flow continues once threads completed.
         time.sleep(1)
@@ -70,12 +86,21 @@ class MapReduceEngine:
     def loadCsvToDB(self):
         csvList=os.listdir('mapreducetemp')
         for i in range(len(csvList)):
-            data = pd.read_csv('mapreducetemp/{0}'.format(csvList[i]))
-            data.to_sql('temp_results', con, if_exists='append', index = False)
+            data = pd.read_csv('mapreducetemp/{0}'.format(csvList[i]), names=['key','value'], header=None)
+            data.to_sql('temp_results', con,schema='online', if_exists='append', index = False)
+    def GroupQueries(self):
+        cur.execute('SELECT key,group_concat(value) FROM temp_results group by key ORDER BY key;')
+        df = pd.read_sql_query("SELECT key,group_concat(value) FROM temp_results group by key ORDER BY key;", con)
+        ls = list(cur.fetchall())
+        print(cur.fetchall())
+        return ls
+
+def printTempResult():
+    cur.execute("SELECT * FROM temp_results")
+    print(cur.fetchall())
 
 #Check type of return variable in function.
 a=MapReduceEngine()
-#a.execute([0,1,2,3,4,5,6],a.CsvPerThread,a.CsvPerThread)
+a.execute([0,1,2,3,4,5,6],a.CsvPerThread,a.CsvPerThreadFinal)
 # df = pd.read_sql_query("SELECT * from temp_results", con)
-for row in cur.execute('SELECT * FROM temp_results;'): print(row)
-\
+print('hi')
