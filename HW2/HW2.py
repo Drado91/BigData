@@ -1,3 +1,4 @@
+import csv
 import os
 import random
 import warnings
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 import sqlite3
 import threading
 import time
+import csv
 
 warnings.filterwarnings('ignore')
 random.seed(123)
@@ -103,4 +105,31 @@ def printTempResult():
 a=MapReduceEngine()
 a.execute([0,1,2,3,4,5,6],a.CsvPerThread,a.CsvPerThreadFinal)
 # df = pd.read_sql_query("SELECT * from temp_results", con)
+
+def inverted_map(document_name,column_index):
+    with open(document_name, 'r') as csvfile:
+        f=csv.DictReader(csvfile)
+        headers=f.fieldnames
+        ls=[]
+        for row in f:
+            ls.append((row[headers[column_index]],document_name))
+            #ls.append((row[0].split(',')[0]+'_'+row[0].split(',')[1],' '+document_name))
+    return ls
+
+def inverted_reduce(key,documents):
+    """
+    with open(document_name, 'r') as csvfile:
+        f=csv.DictReader(csvfile)
+        headers=f.fieldnames
+        ls=[]
+        for row in f:
+            ls.append((row[headers[column_index]],document_name))
+            #ls.append((row[0].split(',')[0]+'_'+row[0].split(',')[1],' '+document_name))
+    return ls
+    """
+    return True
+
+x=inverted_map('CSVs_Folder/myCSV0.csv',1)
+csvList=os.listdir('CSVs_Folder')
+inverted_reduce(key=1,csvList)
 print('hi')
