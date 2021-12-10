@@ -1,4 +1,3 @@
-import csv
 import os
 import random
 import warnings
@@ -11,6 +10,7 @@ import sqlite3
 import threading
 import time
 import csv
+import queue
 
 warnings.filterwarnings('ignore')
 random.seed(123)
@@ -37,10 +37,13 @@ cur = con.cursor()
 #cur.execute('''DROP table IF EXISTS temp_results''')
 cur.execute('''CREATE TABLE IF NOT EXISTS  temp_results (key text, value text)''')
 
-# implement all of the class here
+def thread_function(function, input_data, params, file_name):
+    list = function(input_data, params)
+    temp_df = pd.DataFrame(list)
+    temp_df.to_csv(file_name,index=False, header=None)
 
 class MapReduceEngine:
-    def execute(self, input_data, map_function, reduce_function):
+    def execute(self, input_data, map_function, reduce_function, params):
         """
         :param input_data: is an array of elements
         :param map_function: is a pointer to the Python function that returns a list where each entry of the form (key,value)
@@ -49,33 +52,19 @@ class MapReduceEngine:
         """
         elements_num=len(input_data)
         thread_arr=[]
+        csv_folder_path='CSVs_Folder/'
         for i in range(elements_num):
-            thread_arr.append(threading.Thread(target=map_function,args=[input_data[i]]))
+            thread_arr.append(threading.Thread(target=thread_function,args=(map_function,csv_folder_path+input_data[i],params['column'],'mapreducetemp/part-tmp-{0}.csv'.format(i))))
             thread_arr[i].start()
-        self.isThreadAlive(thread_arr)
+        threadCompleted=self.isThreadAlive(thread_arr)
         self.loadCsvToDB()
         group_list=self.GroupQueries()
         thread_arr = []
-        for i in range(len(group_list)):
-            thread_arr.append(threading.Thread(target=reduce_function,args=[group_list[i]]))
+        for i, element in enumerate(group_list):
+            thread_arr.append(threading.Thread(target=thread_function,args=(reduce_function,element[0],element[1],'mapreducefinal/part-{0}-final.csv'.format(i))))
             thread_arr[i].start()
-        self.isThreadAlive(thread_arr)
-    def CsvPerThread(self, key):
-        records_number = 10
-        x=[]
-        for i in range(records_number): x.append((random.choice(firstname),random.choice(secondname)))
-        thread_num=threading.current_thread().name.split('-')[1]
-        temp_df=pd.DataFrame(x)
-        temp_df.to_csv('mapreducetemp/part-tmp-{0}.csv'.format(thread_num), index=False, header=None)
-        return
-    def CsvPerThreadFinal(self, key):
-        records_number = 10
-        x=[]
-        for i in range(records_number): x.append((random.choice(firstname),random.choice(secondname)))
-        thread_num=threading.current_thread().name.split('-')[1]
-        temp_df=pd.DataFrame(x)
-        temp_df.to_csv('mapreducefinal/part-{0}-final.csv'.format(thread_num), index=False, header=None)
-        return
+        threadCompleted=self.isThreadAlive(thread_arr)
+        if threadCompleted: print('MapReduce Completed')
     def isThreadAlive(self, threadList): #Join in C - flow continues once threads completed.
         time.sleep(1)
         isAlive=True
@@ -85,6 +74,7 @@ class MapReduceEngine:
                 print('Thread #{0} has not finished'.format(thread))
         if isAlive:
             print('All threads completed')
+        return isAlive
     def loadCsvToDB(self):
         csvList=os.listdir('mapreducetemp')
         for i in range(len(csvList)):
@@ -101,11 +91,6 @@ def printTempResult():
     cur.execute("SELECT * FROM temp_results")
     print(cur.fetchall())
 
-#Check type of return variable in function.
-a=MapReduceEngine()
-a.execute([0,1,2,3,4,5,6],a.CsvPerThread,a.CsvPerThreadFinal)
-# df = pd.read_sql_query("SELECT * from temp_results", con)
-
 def inverted_map(document_name,column_index):
     with open(document_name, 'r') as csvfile:
         f=csv.DictReader(csvfile)
@@ -113,23 +98,17 @@ def inverted_map(document_name,column_index):
         ls=[]
         for row in f:
             ls.append((row[headers[column_index]],document_name))
-            #ls.append((row[0].split(',')[0]+'_'+row[0].split(',')[1],' '+document_name))
     return ls
-
 def inverted_reduce(key,documents):
-    """
-    with open(document_name, 'r') as csvfile:
-        f=csv.DictReader(csvfile)
-        headers=f.fieldnames
-        ls=[]
-        for row in f:
-            ls.append((row[headers[column_index]],document_name))
-            #ls.append((row[0].split(',')[0]+'_'+row[0].split(',')[1],' '+document_name))
-    return ls
-    """
-    return True
+    documents = list(dict.fromkeys(documents.split(',')))
+    return documents
 
-x=inverted_map('CSVs_Folder/myCSV0.csv',1)
-csvList=os.listdir('CSVs_Folder')
-inverted_reduce(key=1,csvList)
-print('hi')
+input_data=os.listdir('CSVs_Folder')
+param={'column':1}
+mapreduce = MapReduceEngine()
+status = mapreduce.execute(input_data, inverted_map, inverted_reduce, param)
+os.remove('mydb_hw2.db')
+files_to_delete=os.listdir('mapreducetemp')
+for i,file in enumerate(files_to_delete):
+    os.remove('mapreducetemp/'+file)
+os.rmdir('mapreducetemp')
