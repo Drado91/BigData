@@ -29,4 +29,9 @@ def create_bucket(bucket_name):
 
 
 #create_bucket('bucket-dudi-slava')
+
+"""
+Write Python code with the prototype named “ExtendedObjectStorage” that will internally use MySQL database to support an atomic rename operation against object storage. ExtendedObjectStoage will expose an interface with “create_object, get_object, delete_object, create_directory, delete_directory, list_directory, rename_directory, rename_object”.
+"""
+
 print('hi')
