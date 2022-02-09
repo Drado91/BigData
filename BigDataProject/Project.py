@@ -13,6 +13,7 @@ cos = ibm_boto3.resource("s3",
     config=Config(signature_version="oauth"),
     endpoint_url=COS_ENDPOINT)
 
+#Temporarly functions:
 def create_bucket(bucket_name):
     print("Creating new bucket: {0}".format(bucket_name))
     try:
@@ -26,12 +27,64 @@ def create_bucket(bucket_name):
         print("CLIENT ERROR: {0}\n".format(be))
     except Exception as e:
         print("Unable to create bucket: {0}".format(e))
+def create_text_file(bucket_name, item_name, file_text):
+    print("Creating new item: {0}".format(item_name))
+    try:
+        cos.Object(bucket_name, item_name).put(
+            Body=file_text
+        )
+        print("Item: {0} created!".format(item_name))
+    except ClientError as be:
+        print("CLIENT ERROR: {0}\n".format(be))
+    except Exception as e:
+        print("Unable to create text file: {0}".format(e))
+def get_buckets():
+    print("Retrieving list of buckets")
+    try:
+        buckets = cos.buckets.all()
+        for bucket in buckets:
+            print("Bucket Name: {0}".format(bucket.name))
+    except ClientError as be:
+        print("CLIENT ERROR: {0}\n".format(be))
+    except Exception as e:
+        print("Unable to retrieve list buckets: {0}".format(e))
+def get_bucket_contents(bucket_name):
+    print("Retrieving bucket contents from: {0}".format(bucket_name))
+    try:
+        files = cos.Bucket(bucket_name).objects.all()
+        for file in files:
+            print("Item: {0} ({1} bytes).".format(file.key, file.size))
+    except ClientError as be:
+        print("CLIENT ERROR: {0}\n".format(be))
+    except Exception as e:
+        print("Unable to retrieve bucket contents: {0}".format(e))
 
+#Required Functions:
+def create_object(object_to_create):
+    response=bucket.put_object(Key=object_to_create)
+    print(response)
 
-#create_bucket('bucket-dudi-slava')
+def delete_object(object_to_delete):
+    response=bucket.delete_objects(Delete={'Objects': [{'Key': object_to_delete}]})
+    print(response)
 
 """
-Write Python code with the prototype named “ExtendedObjectStorage” that will internally use MySQL database to support an atomic rename operation against object storage. ExtendedObjectStoage will expose an interface with “create_object, get_object, delete_object, create_directory, delete_directory, list_directory, rename_directory, rename_object”.
+f= open("guru999.txt","w+")
+for i in range(10):
+     f.write("This is line %d\r\n" % (i+1))
+"""
+#create_bucket('bucket-dudi-slava')
+bucket_name="bucket-dudi-slava"
+bucket=cos.Bucket(bucket_name)
+get_bucket_contents(bucket_name)
+#object = bucket.Object(bucket_name,'dudi)
+
+
+"""
+Write Python code with the prototype named “ExtendedObjectStorage” 
+that will internally use MySQL database to support an atomic rename operation against object storage. 
+ExtendedObjectStoage will expose an interface with “create_object, get_object, delete_object, create_directory, delete_directory, list_directory, rename_directory, rename_object”.
+
 """
 
 print('hi')
