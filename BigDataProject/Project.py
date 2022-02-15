@@ -1,180 +1,189 @@
 import ibm_boto3
 from ibm_botocore.client import Config, ClientError
 import sqlite3
+import time
 
 # Constants for IBM COS values
 COS_ENDPOINT = "https://s3.eu.cloud-object-storage.appdomain.cloud" # Current list avaiable at https://control.cloud-object-storage.cloud.ibm.com/v2/endpoints
 COS_API_KEY_ID = "sZnC-SV3PS4OFS0ns5N2uUoVHU-m9N4hUl4Y6P_I_nAM" # eg "W00YixxxxxxxxxxMB-odB-2ySfTrFBIQQWanc--P3byk"
 COS_INSTANCE_CRN = "crn:v1:bluemix:public:cloud-object-storage:global:a/0767c658d1ba4bd69ba5626c95617d42:b72f9df1-e0fc-497e-aa5c-5de298e1bdee::" # eg "crn:v1:bluemix:public:cloud-object-storage:global:a/3bf0d9003xxxxxxxxxx1c3e97696b71c:d6f04d83-6c4f-4a62-a165-696756d63903::"
 COS_BUCKET_LOCATION = "eu-geo"
-# Create resource
-cos = ibm_boto3.resource("s3",
-    ibm_api_key_id=COS_API_KEY_ID,
-    ibm_service_instance_id=COS_INSTANCE_CRN,
-    config=Config(signature_version="oauth"),
-    endpoint_url=COS_ENDPOINT)
 
-#Temporarly functions:
-def create_bucket(bucket_name):
-    print("Creating new bucket: {0}".format(bucket_name))
-    try:
-        cos.Bucket(bucket_name).create(
+
+# A simple database wrapper class based on a local sqlite file. The database schema is <key, value> where key is the
+# most up to date object name and the value is the initial object name and its actual name on the object storage.
+class Database:
+    def __init__(self):
+        self.conn = sqlite3.connect('mydb_project.db')
+        cur = self.conn.cursor()
+        cur.execute("DROP TABLE IF EXISTS renames_table;")
+        cur.execute("CREATE TABLE renames_table (key text NOT NULL, value text NOT NULL)")
+        print('Database is set')
+
+    def insert_key_value(self, key, value):
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO renames_table VALUES ('{}','{}')".format(key, value))
+        self.conn.commit()
+        print(f'Inserted {key}:{value}')
+
+    def delete_key(self, key):
+        cur = self.conn.cursor()
+        cur.execute("DELETE FROM renames_table WHERE key = '{}'".format(key))
+        self.conn.commit()
+        print(f'Deleted {key}')
+
+    def update_key(self, old_key, new_key):
+        cur = self.conn.cursor()
+        cur.execute("UPDATE renames_table SET key = '{}' WHERE key = '{}'".format(new_key, old_key))
+        self.conn.commit()
+        print(f'Updated {old_key}:{new_key}')
+
+    def get_value(self, key):
+        cur = self.conn.cursor()
+        item = cur.execute("SELECT value FROM renames_table WHERE key = '{}'".format(key)).fetchall()
+        if item and item[0]:
+            return item[0][0]
+        return None
+
+    def get_keys_with_prefix(self, prefix):
+        cur = self.conn.cursor()
+        items = cur.execute("SELECT key FROM renames_table WHERE key LIKE '{}%'".format(prefix)).fetchall()
+        if items:
+            items_list = []
+            for item in items:
+                items_list.append(item[0])
+            return items_list
+        return None
+
+    def print_db(self):
+        cur = self.conn.cursor()
+        for row in cur.execute('SELECT * FROM renames_table ORDER BY key'):
+            print(row)
+
+
+# An object storage interface that supports an atomic rename operation by using an additional database. Directory
+# operations are supported by treating directories as object prefixes.
+class ExtendedObjectStorage:
+    def __init__(self):
+        self.cos = ibm_boto3.resource("s3",
+                                      ibm_api_key_id=COS_API_KEY_ID,
+                                      ibm_service_instance_id=COS_INSTANCE_CRN,
+                                      config=Config(signature_version="oauth"),
+                                      endpoint_url=COS_ENDPOINT)
+        ts = time.time()
+        self.bucket_name = f'bucket-{ts}'
+        print("Creating new bucket: {0}".format(self.bucket_name))
+        self.cos.Bucket(self.bucket_name).create(
             CreateBucketConfiguration={
-                "LocationConstraint":COS_BUCKET_LOCATION
+                "LocationConstraint": COS_BUCKET_LOCATION
             }
         )
-        print("Bucket: {0} created!".format(bucket_name))
-    except ClientError as be:
-        print("CLIENT ERROR: {0}\n".format(be))
-    except Exception as e:
-        print("Unable to create bucket: {0}".format(e))
-def create_text_file(bucket_name, item_name, file_text):
-    print("Creating new item: {0}".format(item_name))
-    try:
-        cos.Object(bucket_name, item_name).put(
-            Body=file_text
+        print("Bucket: {0} created!".format(self.bucket_name))
+        self.db = Database()
+        print("ExtendedObjectStorage: all set")
+
+    # Create a new object on the object storage and a new record in the renames table with <object name, object name>.
+    def create_object(self, object_name, object_content):
+        print("Creating new object: {0}".format(object_name))
+        self.cos.Object(self.bucket_name, object_name).put(
+            Body=object_content
         )
-        print("Item: {0} created!".format(item_name))
-    except ClientError as be:
-        print("CLIENT ERROR: {0}\n".format(be))
-    except Exception as e:
-        print("Unable to create text file: {0}".format(e))
-def get_buckets():
-    print("Retrieving list of buckets")
-    try:
-        buckets = cos.buckets.all()
-        for bucket in buckets:
-            print("Bucket Name: {0}".format(bucket.name))
-    except ClientError as be:
-        print("CLIENT ERROR: {0}\n".format(be))
-    except Exception as e:
-        print("Unable to retrieve list buckets: {0}".format(e))
-def get_bucket_contents(bucket_name):
-    print("Retrieving bucket contents from: {0}".format(bucket_name))
-    try:
-        files = cos.Bucket(bucket_name).objects.all()
-        file_list=[]
-        for file in files:
-            file_name="Item: {0} ({1} bytes).".format(file.key, file.size)
-            print(file_name)
-            file_list.append(file_name)
-    except ClientError as be:
-        print("CLIENT ERROR: {0}\n".format(be))
-    except Exception as e:
-        print("Unable to retrieve bucket contents: {0}".format(e))
-    return file_list
+        self.db.insert_key_value(object_name, object_name)
+        print("Object: {0} created!".format(object_name))
 
-#mysal functions:
-def mysql_create_db():
-    con = sqlite3.connect('mydb_project.db')
-    cur = con.cursor()
-    return cur,con
-def mysql_create_table(cur,table,col1,col2):
-    sql_create_table = """ CREATE TABLE IF NOT EXISTS {} (
-                                        {} text NOT NULL,
-                                        {} text NOT NULL
-                                    ); """.format(table,col1,col2)
-    cur.execute(sql_create_table)
-    print('Table {} has been created'.format(table))
-def mysql_show_tables(mysql):
-    mysql.execute("SELECT name FROM sqlite_master WHERE type='table';")
-    tables=mysql.fetchall()
-    tables = [item for t in tables for item in t]
-    print(tables)
-    return tables
-def mysql_insert(con,cur,table,origin_name, name):
-    if not(table in mysql_show_tables(cur)):
-        print('table {} doesnt exist'.format(table))
-    if mysql_get_name(cur,table,origin_name):
-        print('ambigity {} exist on table {}'.format(origin_name,table))
-        return
-    sqlite_insert_query = "INSERT INTO {} VALUES ('{}','{}')".format(table,origin_name,name)
-    count = cur.execute(sqlite_insert_query)
-    con.commit()
-    print("Record inserted successfully into SqliteDb_developers table ", cur.rowcount)
-def mysql_print_rows(con,cur,table):
-    for row in cur.execute('SELECT * FROM {} ORDER BY origin_name'.format(table)):
-        print(row)
-def mysql_drop_table(cursor,table):
-    cursor.execute("DROP TABLE {}".format(table))
-    print("DROP TABLE {}".format(table))
-def mysql_get_name(cur,table,origin_name):
-    item = cur.execute("SELECT name FROM {} WHERE origin_name = '{}'".format(table,origin_name)).fetchall()
-    if len(item) > 1:
-        print('ambiguity, please verify origin_name')
-        print(item)
-        return item
-    elif len(item) == 1:
-        print(item[0][0])
-        return item[0][0]
-    else:
-        print('origin_name doesnt exist')
-        return None
-def mysql_get_origin_name(cur,table,name):
-    item = cur.execute("SELECT origin_name FROM {} WHERE name = '{}'".format(table,name)).fetchall()
-    if len(item) > 1:
-        print('ambiguity, please verify name')
-        print(item)
-        return item
-    elif len(item) == 1:
-        print(item[0][0])
-        return item[0][0]
-    else:
-        print('name doesnt exist')
-        return None
+    # Fetches the most up to date object name from the database and then fetches the object.
+    def get_object(self, object_name):
+        print("Retrieving object from bucket: {0}, key: {1}".format(self.bucket_name, object_name))
+        object_name_in_bucket = self.db.get_value(object_name)
+        if object_name_in_bucket is None:
+            print("No such object")
+        else:
+            obj = self.cos.Object(self.bucket_name, object_name_in_bucket).get()
+            print("Object contents: {0}".format(obj["Body"].read()))
 
-#Required Functions:
-def create_object(object_to_create,file_path,bucket_name="bucket-dudi-slava",):
-    response=cos.meta.client.upload_file(object_to_create, bucket_name, file_path)
-    #TODO:
-    # 1. Origin file verfication
-    #  size-optional, type-optional, existence-mandatory
-    # 2. Destination file verfication
-    #   existence,
-    # 3. Bucket
-    #   existence, list of buckets for user to choose.
-    #response=bucket.put_object(Body=object_to_create)
-    print(response)
-def delete_object(object_to_delete):
-    response=bucket.delete_objects(Delete={'Objects': [{'Key': object_to_delete}]})
-    print(response)
-def get_object(object_to_get, bucket_name = 'bucket-dudi-slava', ):
-    #Code for download:
-    """
-    obj = bucket.Object(object_to_get)
-    with open('filename', 'wb') as data:
-        obj.download_fileobj(data)
-    """
-    #Code for get:
-    return(cos.Object(bucket_name, object_to_get).get())
-def create_directory(directory_name, path=""):
-    response = bucket.put_object(Key=directory_name)
+    # Fetches the most up to date object name from the database and then deletes the object.
+    def delete_object(self, object_name):
+        self.cos.Object(self.bucket_name, object_name).delete()
+        self.db.delete_key(object_name)
+        print("Object: {0} deleted!\n".format(object_name))
 
-#create_bucket('bucket-dudi-slava')
-bucket_name="bucket-dudi-slava"
-bucket=cos.Bucket(bucket_name)
-get_bucket_contents(bucket_name)
-create_object('guru99.txt','guru123.txt')
-f=get_object('guru123.txt')
+    # Updates the most up to date name of the object to a new name in the database. Doesn't change the actual object.
+    def rename_object(self, old_object_name, new_object_name):
+        self.db.update_key(old_object_name, new_object_name)
 
-mysql_cur,mysql_con=mysql_create_db()
-table='names'
-col1='origin_name'
-col2='name'
-mysql_create_table(mysql_cur,table,col1,col2)
-mysql_show_tables(mysql_cur)
-mysql_insert(mysql_con,mysql_cur,table,'origin_name11111222223333','name11111122222333333')
-mysql_print_rows(mysql_con,mysql_cur,table)
-name_to_get='origin_name11111222223333'
-origin_name_to_get='name11111122222333333'
-name=mysql_get_name(mysql_cur,table,name_to_get)
-origian_name=mysql_get_origin_name(mysql_cur,table,origin_name_to_get)
-#object = bucket.Object(bucket_name,'dudi)
+    # Directories do not exist in object storage. Therefore, creating a directory is meaningless and this is a noop
+    # operation (we write some dummy file to the object storage).
+    def create_directory(self, directory_name):
+        print("Creating new directory: {0}".format(directory_name))
+        self.cos.Object(self.bucket_name, directory_name).put(
+            Body=""
+        )
+        print("Directory: {0} created!".format(directory_name))
 
-print('Almost-Finish-Breakpoint')
-"""
-Write Python code with the prototype named “ExtendedObjectStorage” 
-that will internally use MySQL database to support an atomic rename operation against object storage. 
-ExtendedObjectStoage will expose an interface with “create_object, get_object, delete_object, create_directory, delete_directory, list_directory, rename_directory, rename_object”.
+    # Fetches the most up to date object names that have a similar prefix to the directory name from the database and
+    # returns them.
+    def list_directory(self, directory_name):
+        print("Listing directory: {0}".format(directory_name))
+        objs = self.db.get_keys_with_prefix(directory_name)
+        print(objs)
+        return objs
 
-"""
+    # Fetches the most up to date object names that have a similar prefix to the directory name from the database and
+    # deletes them.
+    def delete_directory(self, directory_name):
+        obj_list = self.list_directory(directory_name)
+        # This is for simplicity, we can use a single delete many operation here.
+        for obj in obj_list:
+            self.delete_object(obj)
+
+    # Fetches the most up to date object names that have a similar prefix to the directory name from the database and
+    # renames them.
+    def rename_directory(self, old_directory_name, new_directory_name):
+        obj_list = self.list_directory(old_directory_name)
+        for obj in obj_list:
+            self.rename_object(obj, obj.replace(old_directory_name, new_directory_name))
+
+
+dir1_name = "/dir1"
+dir2_name = "/dir1/dir2"
+object1_name = "/dir1/dir2/object1.txt"
+object2_name = "/dir1/dir2/object2.txt"
+
+# Database operations test suite
+db = Database()
+db.insert_key_value(object1_name, object1_name)
+db.update_key(object1_name, object2_name)
+print(db.get_value(object1_name))
+print(db.get_value(object2_name))
+print(db.get_keys_with_prefix(dir1_name))
+print(db.get_keys_with_prefix(dir2_name))
+print(db.get_keys_with_prefix("invalid"))
+db.delete_key(object2_name)
+db.print_db()
+
+# Objects operations test suite
+eos = ExtendedObjectStorage()
+eos.create_object(object1_name, "I'm a nice object")
+eos.get_object(object1_name)
+eos.delete_object(object1_name)
+eos.get_object(object1_name)
+eos.create_object(object1_name, "I'm a nice object")
+eos.get_object(object1_name)
+eos.rename_object(object1_name, object2_name)
+eos.get_object(object1_name)
+eos.get_object(object2_name)
+
+# Directories operations test suite
+eos = ExtendedObjectStorage()
+eos.list_directory(dir2_name)
+eos.create_object(object1_name, "I'm a nice object")
+eos.list_directory(dir2_name)
+eos.create_object(object2_name, "I'm a nice object")
+eos.list_directory(dir2_name)
+eos.rename_directory(dir2_name, dir1_name)
+eos.list_directory(dir2_name)
+eos.list_directory(dir1_name)
+eos.delete_directory(dir1_name)
+eos.list_directory(dir1_name)
+
+print('Done')
