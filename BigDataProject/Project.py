@@ -88,6 +88,10 @@ class ExtendedObjectStorage:
         self.cos.Object(self.bucket_name, object_name).put(
             Body=object_content
         )
+        # We don't actually need to store the object in the database when it's created but only when it's renamed. We
+        # still do that to simplify the prototype. If we didn't insert all the objects we would have needed to add
+        # existence checks and error handling in the other methods like delete_object and this would complicate the code
+        # unnecessarily.
         self.db.insert_key_value(object_name, object_name)
         print("Object: {0} created!".format(object_name))
 
